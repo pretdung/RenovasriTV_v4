@@ -7,14 +7,20 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -233,10 +239,15 @@ fun TopNavigationBar(
         allItems.indexOfFirst { it.slug == selectedSlug }.coerceAtLeast(0) 
     }
 
+    val homeFocusRequester = remember { FocusRequester() }
+    val profileFocusRequester = remember { FocusRequester() }
+
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.Start
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         TabRow(
             selectedTabIndex = selectedIndex,
@@ -260,10 +271,16 @@ fun TopNavigationBar(
             }
         ) {
             allItems.forEach { item ->
+                val isHome = item.slug == "home"
                 Tab(
                     selected = selectedSlug == item.slug,
                     onFocus = { onItemSelected(item.slug) },
-                    onClick = { onItemSelected(item.slug) }
+                    onClick = { onItemSelected(item.slug) },
+                    modifier = if (isHome) {
+                        Modifier
+                            .focusRequester(homeFocusRequester)
+                            .focusProperties { left = profileFocusRequester }
+                    } else Modifier
                 ) {
                     // Use a Box to align content to the bottom of the tab height
                     Box(
@@ -272,7 +289,7 @@ fun TopNavigationBar(
                             .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                         contentAlignment = Alignment.BottomCenter
                     ) {
-                        if (item.slug == "home") {
+                        if (isHome) {
                             Text(
                                 text = "RENOVASRI",
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
@@ -289,6 +306,43 @@ fun TopNavigationBar(
                         }
                     }
                 }
+            }
+        }
+
+        // Right-aligned Profile Menu
+        var isProfileFocused by remember { mutableStateOf(false) }
+        Surface(
+            onClick = { onItemSelected("profile") },
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                pressedContainerColor = Color.Transparent
+            ),
+            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
+            modifier = Modifier
+                .focusRequester(profileFocusRequester)
+                .focusProperties { right = homeFocusRequester }
+                .onFocusChanged { isProfileFocused = it.isFocused }
+        ) {
+            Box(
+                modifier = Modifier
+                    .height(60.dp)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                AsyncImage(
+                    model = "https://i.pravatar.cc/150?u=renovasri", // Placeholder profile image
+                    contentDescription = "Profile",
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .border(
+                            width = 2.dp,
+                            color = if (isProfileFocused || selectedSlug == "profile") Color(0xFFD4AF37) else Color.Transparent,
+                            shape = CircleShape
+                        ),
+                    contentScale = ContentScale.Crop
+                )
             }
         }
     }

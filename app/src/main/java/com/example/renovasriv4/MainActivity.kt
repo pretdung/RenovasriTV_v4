@@ -236,7 +236,7 @@ fun TopNavigationBar(
     }
     
     val selectedIndex = remember(selectedSlug, allItems) { 
-        allItems.indexOfFirst { it.slug == selectedSlug }.coerceAtLeast(0) 
+        allItems.indexOfFirst { it.slug == selectedSlug } 
     }
 
     val homeFocusRequester = remember { FocusRequester() }
@@ -322,7 +322,10 @@ fun TopNavigationBar(
             modifier = Modifier
                 .focusRequester(profileFocusRequester)
                 .focusProperties { right = homeFocusRequester }
-                .onFocusChanged { isProfileFocused = it.isFocused }
+                .onFocusChanged { 
+                    isProfileFocused = it.isFocused
+                    if (it.isFocused) onItemSelected("profile")
+                }
         ) {
             Box(
                 modifier = Modifier

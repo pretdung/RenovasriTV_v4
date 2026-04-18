@@ -223,58 +223,71 @@ fun TopNavigationBar(
     selectedSlug: String,
     onItemSelected: (String) -> Unit
 ) {
-    val menuItems = remember(items) { 
-        items.filter { it.slug != "home" && it.content?.show_in_navbar != false } 
+    val allItems = remember(items) {
+        val homeItem = items.find { it.slug == "home" }
+        val others = items.filter { it.slug != "home" && it.content?.show_in_navbar != false }
+        if (homeItem != null) listOf(homeItem) + others else others
     }
-    val selectedIndex = remember(selectedSlug, menuItems) { menuItems.indexOfFirst { it.slug == selectedSlug } }
+    
+    val selectedIndex = remember(selectedSlug, allItems) { 
+        allItems.indexOfFirst { it.slug == selectedSlug }.coerceAtLeast(0) 
+    }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.Start
     ) {
-        Surface(
-            onClick = { onItemSelected("home") },
-            scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
-            colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent)
-        ) {
-            Text(
-                text = "RENOVASRI",
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
-                color = if (selectedSlug == "home") Color(0xFFD4AF37) else Color.White,
-                modifier = Modifier.padding(8.dp)
-            )
-        }
-        
-        Spacer(modifier = Modifier.width(32.dp))
-        
         TabRow(
-            selectedTabIndex = if (selectedIndex == -1) 0 else selectedIndex,
+            selectedTabIndex = selectedIndex,
+            containerColor = Color.Transparent,
             indicator = { tabPositions, _ ->
                 if (selectedIndex >= 0 && selectedIndex < tabPositions.size) {
                     val currentTabPosition = tabPositions[selectedIndex]
-                    val animWidth by animateDpAsState(targetValue = currentTabPosition.right - currentTabPosition.left, label = "width")
-                    val animLeft by animateDpAsState(targetValue = currentTabPosition.left, label = "offset")
+                    val animWidth by animateDpAsState(targetValue = (currentTabPosition.right - currentTabPosition.left) * 0.8f, label = "width")
+                    val animLeft by animateDpAsState(targetValue = currentTabPosition.left + (currentTabPosition.right - currentTabPosition.left) * 0.1f, label = "offset")
+                    
                     Box(
-                        Modifier.wrapContentSize(Alignment.BottomStart)
-                            .offset { IntOffset(x = animLeft.roundToPx(), y = 38.dp.roundToPx()) }
-                            .width(animWidth).height(4.dp)
-                            .background(color = Color(0xFFD4AF37), shape = RoundedCornerShape(2.dp))
+                        Modifier
+                            .fillMaxSize()
+                            .wrapContentSize(Alignment.BottomStart)
+                            .offset { IntOffset(x = animLeft.roundToPx(), y = 0) }
+                            .width(animWidth)
+                            .height(6.dp)
+                            .background(color = Color(0xFFD4AF37), shape = RoundedCornerShape(3.dp))
                     )
                 }
             }
         ) {
-            menuItems.forEach { item ->
+            allItems.forEach { item ->
                 Tab(
                     selected = selectedSlug == item.slug,
                     onFocus = { onItemSelected(item.slug) },
                     onClick = { onItemSelected(item.slug) }
                 ) {
-                    Text(
-                        text = item.title.uppercase(),
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        color = if (selectedSlug == item.slug) Color.White else Color.White.copy(alpha = 0.6f)
-                    )
+                    // Use a Box to align content to the bottom of the tab height
+                    Box(
+                        modifier = Modifier
+                            .height(60.dp)
+                            .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                        contentAlignment = Alignment.BottomCenter
+                    ) {
+                        if (item.slug == "home") {
+                            Text(
+                                text = "RENOVASRI",
+                                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
+                                color = if (selectedSlug == item.slug) Color(0xFFD4AF37) else Color.White,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                        } else {
+                            Text(
+                                text = item.title.uppercase(),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = if (selectedSlug == item.slug) Color.White else Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

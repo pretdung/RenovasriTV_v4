@@ -19,15 +19,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -100,6 +104,23 @@ data class GalleryItem(
     @SerialName("image_url") val imageUrl: String = "",
     val category: String = "Semua",
     @SerialName("order_index") val orderIndex: Int = 0
+)
+
+@Serializable
+data class GalleryDetail(
+    val id: Long? = null,
+    val category: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val name: String? = null, // from r.name
+    val philosophy: String? = null,
+    @SerialName("signature_materials") val signatureMaterials: String? = null,
+    val vibe: String? = null,
+    @SerialName("color_1") val color1: String? = null,
+    @SerialName("color_2") val color2: String? = null,
+    @SerialName("color_3") val color3: String? = null,
+    @SerialName("color_4") val color4: String? = null,
+    @SerialName("budget_avg") val budgetAvg: Double? = null // Using budget_avg directly
 )
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -259,12 +280,7 @@ fun MainScreen(supabase: SupabaseClient) {
                             Spacer(modifier = Modifier.height(32.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Button(onClick = { }) { Text("EKSPLORASI SEKARANG") }
-                                Button(
-                                    onClick = { }, 
-                                    colors = ButtonDefaults.colors(containerColor = Color.White.copy(alpha = 0.1f))
-                                ) {
-                                    Text("SIMPAN KE WISHLIST")
-                                }
+
                             }
                         }
                     }
@@ -272,6 +288,7 @@ fun MainScreen(supabase: SupabaseClient) {
             }
         } else {
             GalleryDetailScreen(
+                supabase = supabase,
                 item = selectedGalleryItem!!,
                 onBack = { selectedGalleryItem = null }
             )
@@ -367,9 +384,28 @@ fun GalleryDashboard(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
-fun GalleryDetailScreen(item: GalleryItem, onBack: () -> Unit) {
-    var isOverlayVisible by remember { mutableStateOf(false) }
+fun GalleryDetailScreen(supabase: SupabaseClient, item: GalleryItem, onBack: () -> Unit) {
     val backFocusRequester = remember { FocusRequester() }
+    var details by remember { mutableStateOf<GalleryDetail?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    val formatCurrency: (Double?) -> String = { amount ->
+        if (amount != null) "Rp %,d".format(amount.toLong()).replace(',', '.') + ",-"
+        else "-"
+    }
+
+    LaunchedEffect(item.id) {
+        if (item.id != null) {
+            try {
+                details = supabase.from("gallery_details")
+                    .select { filter { eq("id", item.id) } }
+                    .decodeSingleOrNull<GalleryDetail>()
+            } catch (e: Exception) {
+                Log.e("SUPABASE_ERROR", "Failed to fetch details: ${e.message}")
+            }
+        }
+        isLoading = false
+    }
 
     BackHandler(onBack = onBack)
 
@@ -388,16 +424,6 @@ fun GalleryDetailScreen(item: GalleryItem, onBack: () -> Unit) {
         )
 
         Surface(
-            onClick = { isOverlayVisible = !isOverlayVisible },
-            modifier = Modifier.fillMaxSize(),
-            colors = ClickableSurfaceDefaults.colors(
-                containerColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent
-            ),
-            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp))
-        ) {}
-
-        Surface(
             onClick = onBack,
             modifier = Modifier
                 .padding(32.dp)
@@ -413,46 +439,91 @@ fun GalleryDetailScreen(item: GalleryItem, onBack: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("← BACK", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                Text("← back", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
 
-        if (isOverlayVisible) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center)
-                    .background(Color.White.copy(alpha = 0.85f))
-                    .padding(vertical = 40.dp, horizontal = 58.dp)
-            ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.Center)
+                .background(Color(0xFFF5F3ED).copy(alpha = 0.85f))
+                .drawBehind { 
+                    drawLine(Color.Black.copy(alpha = 0.8f), start = Offset(0f, 0f), end = Offset(size.width, 0f), strokeWidth = 3f)
+                    drawLine(Color.Black.copy(alpha = 0.8f), start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 3f)
+                }
+                .padding(vertical = 40.dp, horizontal = 58.dp)
+        ) {
+            if (isLoading) {
+                Text("Memuat data...", color = Color.Black, modifier = Modifier.align(Alignment.Center))
+            } else {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1.5f)) {
+                    Column(modifier = Modifier.weight(1.2f).padding(end = 40.dp)) {
                         Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black),
+                            text = details?.title ?: item.title,
+                            style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black, fontSize = 64.sp),
                             color = Color.Black
                         )
-                        Box(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp).background(Color(0xFFD4AF37)))
                         Spacer(modifier = Modifier.height(24.dp))
                         Text(
-                            text = item.description ?: "",
-                            style = MaterialTheme.typography.headlineSmall.copy(lineHeight = 36.sp),
+                            text = details?.description ?: item.description ?: "",
+                            style = MaterialTheme.typography.headlineSmall.copy(fontStyle = FontStyle.Italic, lineHeight = 36.sp),
                             color = Color.Black.copy(alpha = 0.8f)
                         )
                     }
 
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .width(6.dp)
+                            .fillMaxHeight()
+                            .background(Color.Black)
+                    )
+
+                    Column(modifier = Modifier.weight(1f).padding(start = 40.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         Column {
-                            Text("Tipe Ruangan", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.Black)
-                            Text(item.category, style = MaterialTheme.typography.bodyLarge, color = Color.Black)
+                            Text("Tipe Ruangan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.Black)
+                            val roomTypes = listOfNotNull(details?.name, details?.vibe, details?.signatureMaterials).joinToString(", ")
+                            Text(if (roomTypes.isNotBlank()) roomTypes else item.category, style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic, color = Color.Black.copy(alpha = 0.8f))
                         }
+                        
                         Column {
-                            Text("Budget", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.Black)
-                            Text("Rp 15.000.000,- s.d. Rp 25.000.000,-", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
+                            Text("Warna Palet :", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row {
+                                val colors = listOfNotNull(details?.color1, details?.color2, details?.color3, details?.color4)
+                                if (colors.isNotEmpty()) {
+                                    colors.forEachIndexed { index, hex ->
+                                        val color = try { Color(android.graphics.Color.parseColor(hex)) } catch(e: Exception) { Color.Gray }
+                                        Box(
+                                            modifier = Modifier
+                                                .offset(x = (-12 * index).dp)
+                                                .size(40.dp)
+                                                .clip(CircleShape)
+                                                .background(color)
+                                                .border(2.dp, Color.White, CircleShape)
+                                        )
+                                    }
+                                } else {
+                                    Text("-", color = Color.Black)
+                                }
+                            }
+                        }
+                        
+                        Column {
+                            Text("Filosofis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Text(details?.philosophy ?: "-", style = MaterialTheme.typography.titleMedium, fontStyle = FontStyle.Italic, color = Color.Black.copy(alpha = 0.8f))
+                        }
+                        
+                        Column {
+                            Text("Estimasi Biaya", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.Black)
+                            val budgetAvg = details?.budgetAvg
+                            val minCost = formatCurrency(budgetAvg?.times(0.75))
+                            val maxCost = formatCurrency(budgetAvg?.times(1.5))
+                            Text("$minCost  s.d.  $maxCost", style = MaterialTheme.typography.titleMedium, color = Color.Black.copy(alpha = 0.8f))
                         }
                     }
                 }

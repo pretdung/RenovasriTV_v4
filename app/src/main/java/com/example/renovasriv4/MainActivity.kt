@@ -3,14 +3,16 @@ package com.example.renovasriv4
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
@@ -23,19 +25,23 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.*
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.Storage
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 class MainActivity : ComponentActivity() {
@@ -65,12 +71,12 @@ class MainActivity : ComponentActivity() {
 
 @Serializable
 data class MenuContent(
-    val menu_item_id: Long? = null,
+    @SerialName("menu_item_id") val menuItemId: Long? = null,
     val subtitle: String? = null,
-    val headline_primary: String? = null,
-    val headline_secondary: String? = null,
+    @SerialName("headline_primary") val headlinePrimary: String? = null,
+    @SerialName("headline_secondary") val headlineSecondary: String? = null,
     val description: String? = null,
-    val show_in_navbar: Boolean? = true
+    @SerialName("show_in_navbar") val showInNavbar: Boolean? = true
 )
 
 @Serializable
@@ -78,10 +84,22 @@ data class NavigationItem(
     val id: Long? = null,
     val title: String,
     val slug: String,
-    val image_url: String? = null,
-    val order_index: Int = 0,
-    val is_active: Boolean = true,
+    @SerialName("destination_page") val destinationPage: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("order_index") val orderIndex: Int = 0,
+    @SerialName("is_active") val isActive: Boolean = true,
     var content: MenuContent? = null
+)
+
+@Serializable
+data class GalleryItem(
+    val id: Long? = null,
+    val title: String = "",
+    val subtitle: String? = null,
+    val description: String? = null,
+    @SerialName("image_url") val imageUrl: String = "",
+    val category: String = "Semua",
+    @SerialName("order_index") val orderIndex: Int = 0
 )
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -90,10 +108,11 @@ fun MainScreen(supabase: SupabaseClient) {
     var navItems by remember { mutableStateOf<List<NavigationItem>>(emptyList()) }
     var selectedSlug by remember { mutableStateOf("home") }
     var isLoading by remember { mutableStateOf(true) }
+    var focusedGalleryImageUrl by remember { mutableStateOf<String?>(null) }
+    var selectedGalleryItem by remember { mutableStateOf<GalleryItem?>(null) }
 
     LaunchedEffect(Unit) {
         try {
-            // Fetch items and content separately to ensure data is retrieved regardless of join issues
             val items = supabase.from("menu_items").select {
                 filter { eq("is_active", true) }
                 order("order_index", Order.ASCENDING)
@@ -106,13 +125,10 @@ fun MainScreen(supabase: SupabaseClient) {
                 emptyList()
             }
 
-            // Manually link content to items
             navItems = items.map { item ->
-                item.copy(content = contents.find { it.menu_item_id == item.id })
+                item.copy(content = contents.find { it.menuItemId == item.id })
             }
-            
             isLoading = false
-            Log.d("SUPABASE_DATA", "Mapped ${navItems.size} items. Home has content: ${navItems.find { it.slug == "home" }?.content != null}")
         } catch (e: Exception) {
             Log.e("SUPABASE_ERROR", "Main fetch failed: ${e.message}")
             isLoading = false
@@ -123,22 +139,37 @@ fun MainScreen(supabase: SupabaseClient) {
         navItems.find { it.slug == selectedSlug } ?: navItems.find { it.slug == "home" }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0A0A))) {
-        // Background Image
-        Crossfade(targetState = currentItem?.image_url, label = "background") { url ->
-            if (!url.isNullOrBlank()) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    onSuccess = { Log.d("IMAGE_LOAD", "Success: $url") },
-                    onError = { Log.e("IMAGE_LOAD", "Error: $url") }
-                )
-            }
+    val backgroundImageUrl = remember(selectedSlug, focusedGalleryImageUrl, currentItem) {
+        if (selectedSlug == "galeri" || selectedSlug == "gallery") {
+            focusedGalleryImageUrl ?: currentItem?.imageUrl
+        } else {
+            currentItem?.imageUrl
+        } ?: "https://vdzqkyrtnpbpfasqorgh.supabase.co/storage/v1/object/public/image_pages/living_room.png"
+    }
+
+    val isGallery = remember(selectedSlug, currentItem) {
+        selectedSlug.lowercase().contains("galeri") || 
+        selectedSlug.lowercase().contains("gallery") ||
+        currentItem?.destinationPage?.contains("gallery", ignoreCase = true) == true
+    }
+
+    Log.d("APP_DEBUG", "MainScreen state: selectedSlug=$selectedSlug, isGallery=$isGallery, navItems=${navItems.size}")
+
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF222222))) {
+        Crossfade(targetState = backgroundImageUrl, label = "background", animationSpec = tween(1000)) { url ->
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                error = ColorPainter(Color(0xFF1A1A1A)),
+                placeholder = ColorPainter(Color.Black)
+            )
         }
 
-        // Gradients for depth and readability
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -155,68 +186,423 @@ fun MainScreen(supabase: SupabaseClient) {
                 )
         )
 
-        // Main UI
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 58.dp)
-        ) {
-            TopNavigationBar(
-                items = navItems,
-                selectedSlug = selectedSlug,
-                onItemSelected = { selectedSlug = it }
-            )
-
-            if (isLoading) {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("MEMUAT...", color = Color.White)
+        if (selectedGalleryItem == null) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.padding(horizontal = 28.dp)) {
+                    TopNavigationBar(
+                        items = navItems,
+                        selectedSlug = selectedSlug,
+                        onItemSelected = {
+                            selectedSlug = it
+                            focusedGalleryImageUrl = null
+                        }
+                    )
                 }
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
 
-                // Content Section
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = currentItem?.content?.subtitle?.uppercase() ?: "",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFFD4AF37), // Gold accent
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 3.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = currentItem?.content?.headline_primary ?: currentItem?.title ?: "",
-                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 72.sp, fontWeight = FontWeight.Black),
-                            color = Color.White
-                        )
-                        if (currentItem?.content?.headline_secondary != null) {
-                            Text(
-                                text = currentItem.content?.headline_secondary ?: "",
-                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 72.sp, fontWeight = FontWeight.Black),
-                                color = Color.White.copy(alpha = 0.6f)
+                if (isLoading) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("MEMUAT...", color = Color.White)
+                    }
+                } else if (navItems.isEmpty()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("GAGAL MEMUAT DATA", color = Color.White)
+                    }
+                } else {
+                    if (isGallery) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            GalleryDashboard(
+                                supabase = supabase,
+                                onFocusItem = { focusedImageUrl ->
+                                    focusedGalleryImageUrl = focusedImageUrl
+                                },
+                                onSelectItem = { item ->
+                                    selectedGalleryItem = item
+                                }
                             )
                         }
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text(
-                            text = currentItem?.content?.description ?: "",
-                            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp),
-                            color = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.width(550.dp)
-                        )
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Button(onClick = { }) { Text("EKSPLORASI SEKARANG") }
-                            Button(
-                                onClick = { }, 
-                                colors = ButtonDefaults.colors(containerColor = Color.White.copy(alpha = 0.1f))
-                            ) {
-                                Text("SIMPAN KE WISHLIST")
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 58.dp)
+                                .padding(bottom = 60.dp),
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            Text(
+                                text = currentItem?.content?.subtitle?.uppercase() ?: "",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color(0xFFD4AF37),
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 3.sp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = currentItem?.content?.headlinePrimary ?: currentItem?.title ?: "",
+                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 72.sp, fontWeight = FontWeight.Black),
+                                color = Color.White
+                            )
+                            if (currentItem?.content?.headlineSecondary != null) {
+                                Text(
+                                    text = currentItem.content?.headlineSecondary ?: "",
+                                    style = MaterialTheme.typography.displayLarge.copy(fontSize = 72.sp, fontWeight = FontWeight.Black),
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Text(
+                                text = currentItem?.content?.description ?: "",
+                                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp),
+                                color = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.width(550.dp)
+                            )
+                            Spacer(modifier = Modifier.height(32.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Button(onClick = { }) { Text("EKSPLORASI SEKARANG") }
+                                Button(
+                                    onClick = { }, 
+                                    colors = ButtonDefaults.colors(containerColor = Color.White.copy(alpha = 0.1f))
+                                ) {
+                                    Text("SIMPAN KE WISHLIST")
+                                }
                             }
                         }
                     }
                 }
+            }
+        } else {
+            GalleryDetailScreen(
+                item = selectedGalleryItem!!,
+                onBack = { selectedGalleryItem = null }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun GalleryDashboard(
+    supabase: SupabaseClient, 
+    onFocusItem: (String) -> Unit,
+    onSelectItem: (GalleryItem) -> Unit
+) {
+    var selectedCategory by remember { mutableStateOf("Semua") }
+    var allItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        isLoading = true
+        try {
+            allItems = supabase.from("gallery_dashboard")
+                .select()
+                .decodeList<GalleryItem>()
+        } catch (e: Exception) {
+            Log.e("GALLERY_ERROR", "Fetch failed: ${e.message}")
+        } finally {
+            isLoading = false
+        }
+    }
+
+    val galleryItems = remember(selectedCategory, allItems) {
+        if (selectedCategory == "Semua") allItems else allItems.filter { it.category == selectedCategory }
+    }
+
+    val categories = remember(allItems) {
+        listOf("Semua") + allItems.map { it.category }.distinct().sorted()
+    }
+
+    Row(modifier = Modifier.fillMaxSize().padding(top = 24.dp)) {
+        Column(
+            modifier = Modifier
+                .width(220.dp)
+                .padding(start = 58.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            categories.forEach { category ->
+                val isSelected = selectedCategory == category
+                Surface(
+                    onClick = { selectedCategory = category },
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = if (isSelected) Color(0xFFD4AF37) else Color.Transparent,
+                        focusedContainerColor = if (isSelected) Color(0xFFD4AF37) else Color.White.copy(alpha = 0.1f)
+                    ),
+                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+                    scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = category,
+                        color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            letterSpacing = 1.sp
+                        ),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(24.dp))
+
+        Column(modifier = Modifier.weight(1f).padding(end = 58.dp)) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("MEMUAT...", color = Color.White)
+                }
+            } else if (allItems.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("GALERI KOSONG", color = Color.White.copy(alpha = 0.5f))
+                }
+            } else {
+                GalleryGrid(
+                    items = galleryItems,
+                    onFocusItem = { item -> onFocusItem(item.imageUrl) },
+                    onSelectItem = onSelectItem
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun GalleryDetailScreen(item: GalleryItem, onBack: () -> Unit) {
+    var isOverlayVisible by remember { mutableStateOf(false) }
+    val backFocusRequester = remember { FocusRequester() }
+
+    BackHandler(onBack = onBack)
+
+    LaunchedEffect(Unit) {
+        backFocusRequester.requestFocus()
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        AsyncImage(
+            model = item.imageUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+            error = ColorPainter(Color(0xFF1A1A1A)),
+            placeholder = ColorPainter(Color.Black)
+        )
+
+        Surface(
+            onClick = { isOverlayVisible = !isOverlayVisible },
+            modifier = Modifier.fillMaxSize(),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent
+            ),
+            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp))
+        ) {}
+
+        Surface(
+            onClick = onBack,
+            modifier = Modifier
+                .padding(32.dp)
+                .align(Alignment.TopStart)
+                .focusRequester(backFocusRequester),
+            colors = ClickableSurfaceDefaults.colors(
+                containerColor = Color.Black.copy(alpha = 0.5f),
+                focusedContainerColor = Color.White.copy(alpha = 0.2f)
+            ),
+            shape = ClickableSurfaceDefaults.shape(CircleShape)
+        ) {
+            Box(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("← BACK", color = Color.White, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+
+        if (isOverlayVisible) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.Center)
+                    .background(Color.White.copy(alpha = 0.85f))
+                    .padding(vertical = 40.dp, horizontal = 58.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1.5f)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black),
+                            color = Color.Black
+                        )
+                        Box(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp).background(Color(0xFFD4AF37)))
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = item.description ?: "",
+                            style = MaterialTheme.typography.headlineSmall.copy(lineHeight = 36.sp),
+                            color = Color.Black.copy(alpha = 0.8f)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        Column {
+                            Text("Tipe Ruangan", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Text(item.category, style = MaterialTheme.typography.bodyLarge, color = Color.Black)
+                        }
+                        Column {
+                            Text("Budget", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Text("Rp 15.000.000,- s.d. Rp 25.000.000,-", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun GalleryGrid(
+    items: List<GalleryItem>, 
+    onFocusItem: (GalleryItem) -> Unit,
+    onSelectItem: (GalleryItem) -> Unit
+) {
+    val scrollState = rememberScrollState()
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (items.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Tidak ada item ditemukan", color = Color.White.copy(alpha = 0.5f))
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(end = 48.dp, bottom = 40.dp)
+            ) {
+                val rows = items.chunked(3)
+                rows.forEach { rowItems ->
+                    Row(modifier = Modifier.fillMaxWidth().height(380.dp)) {
+                        rowItems.forEachIndexed { colIndex, item ->
+                            GalleryCard(
+                                item = item,
+                                onFocus = { onFocusItem(item) },
+                                onSelect = { onSelectItem(item) },
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            )
+                            if (colIndex < rowItems.size - 1) {
+                                Spacer(modifier = Modifier.width(28.dp))
+                            }
+                        }
+                        repeat(3 - rowItems.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(28.dp))
+                }
+            }
+        }
+        
+        if (items.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(0.9f)
+                    .width(12.dp)
+                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+            ) {
+                val scrollPercentage by remember {
+                    derivedStateOf {
+                        if (scrollState.maxValue > 0) scrollState.value.toFloat() / scrollState.maxValue else 0f
+                    }
+                }
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val thumbHeight = maxHeight * 0.2f
+                    val trackHeight = maxHeight - thumbHeight
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(thumbHeight)
+                            .offset(y = trackHeight * scrollPercentage)
+                            .background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+fun GalleryCard(
+    item: GalleryItem, 
+    onFocus: () -> Unit, 
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    Surface(
+        onClick = onSelect,
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
+        modifier = modifier.onFocusChanged { if (it.isFocused) onFocus() }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(item.imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                error = ColorPainter(Color(0xFF2A2A2A)),
+                placeholder = ColorPainter(Color(0xFF1A1A1A))
+            )
+            
+            Box(
+                modifier = Modifier
+                    .width(48.dp)
+                    .height(8.dp)
+                    .background(
+                        color = Color(0xFFD4AF37),
+                        shape = RoundedCornerShape(bottomEnd = 8.dp)
+                    )
+                    .align(Alignment.TopStart)
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f)),
+                            startY = 400f
+                        )
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = item.category.uppercase(),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFD4AF37)
+                    )
+                )
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Black,
+                        lineHeight = 28.sp
+                    ),
+                    color = Color.White
+                )
             }
         }
     }
@@ -231,7 +617,7 @@ fun TopNavigationBar(
 ) {
     val allItems = remember(items) {
         val homeItem = items.find { it.slug == "home" }
-        val others = items.filter { it.slug != "home" && it.content?.show_in_navbar != false }
+        val others = items.filter { it.slug != "home" && it.content?.showInNavbar != false }
         if (homeItem != null) listOf(homeItem) + others else others
     }
     
@@ -250,13 +636,17 @@ fun TopNavigationBar(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         TabRow(
-            selectedTabIndex = selectedIndex,
+            selectedTabIndex = if (selectedIndex >= 0) selectedIndex else 0,
             containerColor = Color.Transparent,
             indicator = { tabPositions, _ ->
                 if (selectedIndex >= 0 && selectedIndex < tabPositions.size) {
                     val currentTabPosition = tabPositions[selectedIndex]
-                    val animWidth by animateDpAsState(targetValue = (currentTabPosition.right - currentTabPosition.left) * 0.8f, label = "width")
-                    val animLeft by animateDpAsState(targetValue = currentTabPosition.left + (currentTabPosition.right - currentTabPosition.left) * 0.1f, label = "offset")
+                    val isHomeSelected = selectedIndex == 0
+                    val widthMultiplier = if (isHomeSelected) 0.85f else 0.8f
+                    val offsetMultiplier = if (isHomeSelected) 0.0f else 0.1f
+                    
+                    val animWidth by animateDpAsState(targetValue = (currentTabPosition.right - currentTabPosition.left) * widthMultiplier, label = "width")
+                    val animLeft by animateDpAsState(targetValue = currentTabPosition.left + (currentTabPosition.right - currentTabPosition.left) * offsetMultiplier, label = "offset")
                     
                     Box(
                         Modifier
@@ -282,18 +672,17 @@ fun TopNavigationBar(
                             .focusProperties { left = profileFocusRequester }
                     } else Modifier
                 ) {
-                    // Use a Box to align content to the bottom of the tab height
                     Box(
                         modifier = Modifier
                             .height(60.dp)
-                            .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                            .padding(start = if (isHome) 0.dp else 16.dp, end = 16.dp, bottom = 4.dp),
                         contentAlignment = Alignment.BottomCenter
                     ) {
                         if (isHome) {
                             Text(
                                 text = "RENOVASRI",
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Black),
-                                color = if (selectedSlug == item.slug) Color(0xFFD4AF37) else Color.White,
+                                color = Color.White,
                                 modifier = Modifier.padding(bottom = 2.dp)
                             )
                         } else {
@@ -309,7 +698,6 @@ fun TopNavigationBar(
             }
         }
 
-        // Right-aligned Profile Menu
         var isProfileFocused by remember { mutableStateOf(false) }
         Surface(
             onClick = { onItemSelected("profile") },
@@ -330,11 +718,11 @@ fun TopNavigationBar(
             Box(
                 modifier = Modifier
                     .height(60.dp)
-                    .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                    .padding(start = 16.dp, end = 0.dp, bottom = 4.dp),
                 contentAlignment = Alignment.BottomCenter
             ) {
                 AsyncImage(
-                    model = "https://i.pravatar.cc/150?u=renovasri", // Placeholder profile image
+                    model = "https://i.pravatar.cc/150?u=renovasri",
                     contentDescription = "Profile",
                     modifier = Modifier
                         .size(42.dp)
